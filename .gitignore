@@ -1,0 +1,43 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+env/
+*.egg
+
+# Environment
+.env
+backend/.env
+
+# Database
+backend/data/agent.db
+
+# Node.js
+node_modules/
+frontend/node_modules/
+
+# Next.js
+frontend/.next/
+frontend/out/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build
+*.tsbuildinfo
+frontend/tsconfig.tsbuildinfo
+
+# Misc
+*.log

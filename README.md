@@ -1,246 +1,383 @@
-# Agent Template
+<div align="center">
 
-A minimal, pluggable AI agent framework. Add your LLM provider API key, drop a Skill file in one directory, and you have a working agent with a Web UI.
+# 🤖 Agent Template
+
+**可插拔 AI 智能体框架，开箱即用的 Web UI**
+
+接入任意 LLM 服务商，拖入 Skill 插件，几分钟构建你自己的 AI Agent。
+
+[![Python](https://img.shields.io/badge/Python-3.8+-blue?logo=python&logoColor=white)](https://www.python.org/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
+[![Next.js](https://img.shields.io/badge/Next.js-16-black?logo=next.js&logoColor=white)](https://nextjs.org/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![SQLite](https://img.shields.io/badge/SQLite-aiosqlite-003B57?logo=sqlite&logoColor=white)](https://www.sqlite.org/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
+</div>
+
+---
+
+## ✨ 特性一览
+
+- **12+ LLM 服务商** — OpenAI、Anthropic Claude、Moonshot/Kimi、DeepSeek、通义千问、智谱 GLM、零一万物、Groq、Together AI、Ollama 及任意 OpenAI 兼容接口
+- **ReAct Agent 循环** — 自主多步推理 + 工具调用（最多 5 轮迭代，自动检测重复调用并终止）
+- **可插拔 Skill** — 放入 `.py` 文件或通过 Web UI 上传即可扩展能力，无需改动框架代码
+- **流式输出** — 基于 SSE 的实时流式响应，逐字显示 + 工具调用过程可视化
+- **对话持久化** — 聊天记录存入 SQLite，侧边栏浏览/重命名/删除历史会话
+- **Provider 管理** — 在设置页增删改查 LLM 服务商配置，支持一键**连接测试**
+- **Skill 管理** — 在设置页启用/禁用/上传/删除技能插件
+- **暗色主题 UI** — 基于 Tailwind CSS 的现代化响应式界面
+
+---
+
+## 🏗️ 系统架构
 
 ```
-┌──────────────┐       SSE stream       ┌──────────────┐
-│  Next.js UI  │ ◄──────────────────── │ FastAPI back  │
-│  (port 3000) │ ──── POST /api/chat ─► │  (port 8000) │
-└──────────────┘                        └──────┬───────┘
+                            ┌─────────────────────────────────────────┐
+                            │              用户浏览器                   │
+                            └──────────────────┬──────────────────────┘
                                                │
-                                 ┌─────────────┼─────────────┐
-                                 ▼             ▼             ▼
-                             LLM SDK     Skill: calc    Skill: search
-                          (openai/       (built-in)     (built-in)
-                          anthropic)
+                                       http://localhost:3000
+                                               │
+                ┌──────────────────────────────┴──────────────────────────────┐
+                │                      Next.js 前端                           │
+                │                                                             │
+                │   ┌─────────┐   ┌──────────────┐   ┌───────────────────┐   │
+                │   │ 会话侧栏 │   │   对话主区域   │   │   设置页面        │   │
+                │   │         │   │              │   │                   │   │
+                │   │ • 新建   │   │ • 消息列表    │   │ • Provider 管理   │   │
+                │   │ • 历史   │   │ • 工具调用卡片 │   │ • Skill 管理     │   │
+                │   │ • 重命名 │   │ • 流式渲染    │   │ • 连接测试       │   │
+                │   │ • 删除   │   │ • System     │   │ • 上传 Skill     │   │
+                │   │         │   │   Prompt     │   │                   │   │
+                │   └─────────┘   └──────────────┘   └───────────────────┘   │
+                └──────────────────────────┬──────────────────────────────────┘
+                                           │
+                              REST API + SSE Stream
+                                           │
+                ┌──────────────────────────┴──────────────────────────────────┐
+                │                     FastAPI 后端 (:8000)                     │
+                │                                                             │
+                │   ┌─────────────────────────────────────────────────────┐   │
+                │   │                   API 路由层                         │   │
+                │   │                                                     │   │
+                │   │  /api/chat    /api/providers   /api/conversations   │   │
+                │   │               /api/skills                           │   │
+                │   └────────────────────┬────────────────────────────────┘   │
+                │                        │                                    │
+                │          ┌─────────────┴─────────────┐                     │
+                │          ▼                           ▼                      │
+                │   ┌─────────────┐           ┌──────────────┐               │
+                │   │ ReAct Agent │           │  Skill 加载器 │               │
+                │   │    循环     │◄─────────►│  (自动发现)   │               │
+                │   └──────┬──────┘           └──────┬───────┘               │
+                │          │                         │                        │
+                │     ┌────┴────┐          ┌─────────┴─────────┐             │
+                │     ▼         ▼          ▼         ▼         ▼             │
+                │  ┌──────┐ ┌──────┐  ┌────────┐┌────────┐┌────────┐        │
+                │  │OpenAI│ │Claude│  │计算器   ││网络搜索 ││日期时间 │        │
+                │  │ SDK  │ │ SDK  │  │        ││        ││        │        │
+                │  └──────┘ └──────┘  └────────┘└────────┘└────────┘        │
+                │     LLM 客户端               内置 Skills                    │
+                │     工厂                     + 用户自定义                    │
+                │                                                             │
+                │   ┌─────────────────────────────────────────────────────┐   │
+                │   │                SQLite 数据库                         │   │
+                │   │                                                     │   │
+                │   │  providers │ skills_config │ conversations │ messages│   │
+                │   └─────────────────────────────────────────────────────┘   │
+                └─────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## Quick Start
+## 🚀 快速开始
 
-### 1 — Clone and install
+### 环境要求
+
+| 工具 | 版本 |
+|------|------|
+| Python | 3.8+ |
+| Node.js | 18+ |
+| pip / npm | 最新版 |
+
+### 1. 克隆仓库
 
 ```bash
-git clone <this-repo>
+git clone https://github.com/<your-username>/agent-template.git
 cd agent-template
 ```
 
-**Backend**
+### 2. 安装依赖
 
 ```bash
+# 后端
 cd backend
 pip install -r requirements.txt
-```
 
-**Frontend**
-
-```bash
-cd frontend
+# 前端
+cd ../frontend
 npm install
 ```
 
-### 2 — Start the servers
+### 3. 启动服务
 
-**Backend** (in `backend/`)
+打开 **两个终端**：
 
 ```bash
+# 终端 1 — 后端
+cd backend
 uvicorn main:app --reload --port 8000
 ```
 
-**Frontend** (in `frontend/`)
-
 ```bash
+# 终端 2 — 前端
+cd frontend
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000).
+### 4. 打开浏览器
 
-### 3 — Add a provider
+访问 **[http://localhost:3000](http://localhost:3000)**
 
-Click **Settings** in the top-right corner, then **Add Provider**. Fill in:
+### 5. 添加 Provider
 
-| Field | Example |
-|---|---|
-| Name | My OpenAI |
-| Provider Type | openai |
-| API Key | `sk-...` |
-| Base URL | `https://api.openai.com/v1` (or leave blank for default) |
-| Default Model | `gpt-4o-mini` |
-
-Hit **Save** and go back to chat. You're ready.
-
-**Supported provider types**
-
-| Type | Description |
-|---|---|
-| `openai` | OpenAI or any OpenAI-compatible API (Moonshot, DeepSeek, Qwen, etc.) |
-| `openai_compat` | Alias for openai — use for custom / self-hosted endpoints |
-| `anthropic` | Anthropic Claude via the official SDK |
-
-For OpenAI-compatible providers (Moonshot, DeepSeek, etc.) just set **Provider Type = openai** and provide the correct **Base URL** and model name.
+点击左侧边栏底部 **Settings** → **Add Provider** → 填写 API Key → **Save**，即可开始对话。
 
 ---
 
-## Adding a Custom Skill
+## 🔌 支持的服务商
 
-1. Create a new Python file in `backend/skills/`, e.g. `my_skill.py`.
-2. Inherit from `Skill` and implement `execute`.
-3. Restart the backend — the skill is auto-discovered and available to the agent.
+| 服务商 | 类型 | Base URL | 代表模型 |
+|--------|------|----------|----------|
+| OpenAI | `openai` | `https://api.openai.com/v1` | `gpt-4o`、`gpt-4o-mini` |
+| Anthropic | `anthropic` | （SDK 内置） | `claude-3-5-sonnet-20241022` |
+| Moonshot (Kimi) | `moonshot` | `https://api.moonshot.cn/v1` | `kimi-k2.5` |
+| DeepSeek | `deepseek` | `https://api.deepseek.com/v1` | `deepseek-chat` |
+| 通义千问 (Qwen) | `qwen` | `https://dashscope.aliyuncs.com/compatible-mode/v1` | `qwen-max` |
+| 智谱 AI (GLM) | `zhipu` | `https://open.bigmodel.cn/api/paas/v4` | `glm-4` |
+| 零一万物 (Yi) | `yi` | `https://api.lingyiwanwu.com/v1` | `yi-large` |
+| 百川智能 | `baichuan` | `https://api.baichuan-ai.com/v1` | `Baichuan4` |
+| MiniMax (海螺) | `minimax` | `https://api.minimax.chat/v1` | `MiniMax-Text-01` |
+| Groq | `groq` | `https://api.groq.com/openai/v1` | `llama-3.3-70b-versatile` |
+| Together AI | `together` | `https://api.together.xyz/v1` | `Llama-3.3-70B-Instruct-Turbo` |
+| Ollama（本地） | `ollama` | `http://localhost:11434/v1` | `llama3.2` |
+| 自定义 | `openai_compat` | 任意 OpenAI 兼容地址 | 自行填写 |
 
-### Minimal example
+> **使用代理/中转站？** 将 Base URL 改为代理地址，模型名与代理实际支持的保持一致。添加后可在设置页点击 **Test** 按钮验证连接。
+
+---
+
+## 🛠️ 内置技能
+
+| 技能 | 功能 | 依赖 |
+|------|------|------|
+| `calculator` | 安全计算数学表达式（`sqrt`、`sin`、`log`、`pi` 等） | 无 |
+| `web_search` | DuckDuckGo 搜索，支持 `search`（网页）和 `news`（新闻）模式 | 需要网络 |
+| `datetime_info` | 获取当前日期、时间、星期、时区 | 无 |
+
+---
+
+## 🧩 添加自定义技能
+
+### 方式一：通过 Web UI 上传
+
+进入 **Settings** → 点击 **Upload Skill** → 选择 `.py` 文件 → 自动验证并注册，立即可用。
+
+### 方式二：放入目录
+
+在 `backend/skills/` 下新建 `.py` 文件，重启后端自动发现。
+
+### Skill 模板
 
 ```python
-# backend/skills/my_skill.py
 from skills.base import Skill
 
-class GreetSkill(Skill):
-    name = "greet"
-    description = "Greet a person by name."
+class MySkill(Skill):
+    name = "my_skill"                         # 唯一标识（建议 snake_case）
+    description = "描述技能做什么，帮助 LLM 决定何时调用。"
     parameters = {
         "type": "object",
         "properties": {
-            "person_name": {
+            "query": {
                 "type": "string",
-                "description": "The name of the person to greet.",
+                "description": "要处理的输入"
             }
         },
-        "required": ["person_name"],
+        "required": ["query"],
     }
 
-    def execute(self, person_name: str) -> str:
-        return f"Hello, {person_name}! Nice to meet you."
+    def execute(self, query: str) -> str:
+        return f"处理结果：{query}"
 ```
 
-That's it. The LLM will call this skill automatically when it decides it's relevant.
+### 编写规范
 
-### Skill interface reference
-
-```python
-class Skill(ABC):
-    name: str           # Unique tool name (snake_case recommended)
-    description: str    # Shown to the LLM — be clear and specific
-    parameters: dict    # JSON Schema for the arguments
-
-    def execute(self, **kwargs) -> str:
-        # Receives the LLM's arguments as keyword args.
-        # Must return a plain string (the tool result shown back to the LLM).
-        ...
-```
-
-### Tips for writing good Skills
-
-- Keep `description` clear and action-oriented: *"Search the web for current information"* not *"web search"*.
-- Return concise string results — the LLM re-reads the output.
-- For long outputs (e.g. file contents) truncate or summarize to avoid context overflow.
-- Skills are synchronous — for async operations (HTTP requests, DB queries), use `asyncio.run()` or a sync wrapper inside `execute`.
+- `name` 必须全局唯一
+- `execute()` 的参数名必须与 `parameters.properties` 的键名一致
+- `execute()` 必须返回 **字符串**
+- `description` 写得越清楚，LLM 调用越准确
 
 ---
 
-## Built-in Skills
-
-| Skill | Description | Requires |
-|---|---|---|
-| `calculator` | Safely evaluates math expressions | Nothing |
-| `web_search` | DuckDuckGo text search | Network access |
-
----
-
-## Project Structure
+## 📁 项目结构
 
 ```
 agent-template/
 ├── backend/
-│   ├── main.py                 # FastAPI entry point
+│   ├── main.py                 # FastAPI 入口 + 生命周期
 │   ├── requirements.txt
-│   ├── core/
-│   │   ├── agent.py            # ReAct agent loop (tool calls + streaming SSE)
-│   │   ├── llm.py              # LLM provider factory
-│   │   └── skill_loader.py     # Auto-discovers skills/ directory
-│   ├── skills/
-│   │   ├── base.py             # Skill base class ← extend this
-│   │   ├── calculator.py       # Built-in: math evaluator
-│   │   └── web_search.py       # Built-in: DuckDuckGo search
 │   ├── api/
-│   │   ├── chat.py             # POST /api/chat  (SSE)
-│   │   ├── providers.py        # CRUD /api/providers
-│   │   └── skills.py           # GET  /api/skills
-│   └── db/
-│       └── storage.py          # SQLite helpers (aiosqlite)
+│   │   ├── chat.py             # POST /api/chat（SSE 流式 + 消息持久化）
+│   │   ├── conversations.py    # CRUD /api/conversations
+│   │   ├── providers.py        # CRUD /api/providers + 连接测试
+│   │   └── skills.py           # /api/skills（列表、上传、开关、删除）
+│   ├── core/
+│   │   ├── agent.py            # ReAct Agent 循环（多步工具调用）
+│   │   ├── llm.py              # LLM 客户端工厂（OpenAI / Anthropic）
+│   │   └── skill_loader.py     # 自动发现、DB 同步、文件验证
+│   ├── skills/
+│   │   ├── base.py             # Skill 抽象基类
+│   │   ├── calculator.py       # 内置：数学计算器
+│   │   ├── datetime_info.py    # 内置：日期时间查询
+│   │   └── web_search.py       # 内置：DuckDuckGo 搜索
+│   ├── db/
+│   │   └── storage.py          # 异步 SQLite 封装（4 张表）
+│   └── data/
+│       └── agent.db            # SQLite 数据库（首次运行自动创建）
+│
 ├── frontend/
 │   ├── app/
-│   │   ├── page.tsx            # Chat interface
-│   │   └── settings/page.tsx   # Provider management
+│   │   ├── page.tsx            # 对话主页（侧边栏 + 对话区）
+│   │   └── settings/page.tsx   # Provider + Skill 管理
 │   ├── components/
-│   │   ├── ChatMessage.tsx     # Message renderer (Markdown + tool call blocks)
-│   │   └── SkillBadge.tsx      # Skill pill with tooltip
+│   │   ├── ChatMessage.tsx     # 消息气泡（Markdown + 工具调用卡片）
+│   │   └── SkillBadge.tsx      # 技能标签（含 Tooltip）
 │   └── lib/
-│       └── api.ts              # Typed API client + SSE streaming
-├── .env.example
-└── README.md
+│       └── api.ts              # 类型化 API 客户端 + SSE 流
+│
+├── docs/
+│   ├── 用户使用手册.md
+│   └── 项目架构与调用流程.md
+│
+├── .env.example                # 环境变量模板
+├── .gitignore
+└── LICENSE
 ```
 
 ---
 
-## Environment Variables
+## ⚙️ 环境变量
 
-Copy `.env.example` to `.env` (in `backend/`) for optional configuration:
+将 `.env.example` 复制到 `backend/.env`：
 
 ```bash
 cp .env.example backend/.env
 ```
 
-| Variable | Default | Description |
-|---|---|---|
-| `DB_PATH` | `data/agent.db` | Path to the SQLite database file |
-| `DEFAULT_PROVIDER_NAME` | — | Auto-seed a provider on first launch |
-| `DEFAULT_PROVIDER_API_KEY` | — | API key for the auto-seeded provider |
-| `DEFAULT_PROVIDER_TYPE` | `openai` | Provider type for auto-seeded provider |
-| `DEFAULT_PROVIDER_BASE_URL` | — | Base URL for auto-seeded provider |
-| `DEFAULT_PROVIDER_MODEL` | `gpt-4o-mini` | Model for auto-seeded provider |
+**后端：**
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `DB_PATH` | `data/agent.db` | SQLite 数据库路径 |
+| `DEFAULT_PROVIDER_NAME` | — | 首次启动时自动创建的 Provider 名称 |
+| `DEFAULT_PROVIDER_TYPE` | `openai` | 自动创建的 Provider 类型 |
+| `DEFAULT_PROVIDER_API_KEY` | — | 自动创建的 Provider API Key |
+| `DEFAULT_PROVIDER_BASE_URL` | — | 自动创建的 Provider 接口地址 |
+| `DEFAULT_PROVIDER_MODEL` | `gpt-4o-mini` | 自动创建的 Provider 默认模型 |
+
+> 仅当数据库中 **没有任何 Provider** 时才会执行自动创建。
+
+**前端** (`frontend/.env.local`)：
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `NEXT_PUBLIC_API_URL` | `http://localhost:8000` | 后端 API 地址 |
 
 ---
 
-## API Reference
+## 📡 API 接口
 
-### `POST /api/chat`
+后端启动后可访问交互式文档：**[http://localhost:8000/docs](http://localhost:8000/docs)**
 
-Request body:
+### 对话
+
+```
+POST /api/chat
+```
 
 ```json
 {
   "provider_id": 1,
-  "messages": [{"role": "user", "content": "What is 2^10?"}],
-  "system_prompt": "You are a helpful assistant."
+  "messages": [{ "role": "user", "content": "2 的 10 次方是多少？" }],
+  "system_prompt": "You are a helpful assistant.",
+  "conversation_id": null
 }
 ```
 
-Response: `text/event-stream` with events:
+返回 `text/event-stream`：
 
 ```
-data: {"type": "token",      "content": "The answer is "}
 data: {"type": "tool_start", "name": "calculator", "args": {"expression": "2**10"}}
 data: {"type": "tool_end",   "name": "calculator", "result": "1024"}
-data: {"type": "token",      "content": "1024."}
+data: {"type": "token",      "content": "2 的 10 次方是 **1024**。"}
 data: {"type": "done"}
 ```
 
-### `GET /api/providers`
+### Provider 管理
 
-Returns list of configured providers (API keys masked).
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| `GET` | `/api/providers` | 获取列表（API Key 已脱敏） |
+| `POST` | `/api/providers` | 新建 |
+| `PATCH` | `/api/providers/{id}` | 更新 |
+| `DELETE` | `/api/providers/{id}` | 删除 |
+| `POST` | `/api/providers/{id}/test` | 连接测试 |
 
-### `POST /api/providers`
+### Skill 管理
 
-Create a new provider.
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| `GET` | `/api/skills` | 获取列表（含启用状态） |
+| `POST` | `/api/skills/upload` | 上传 `.py` 文件 |
+| `PATCH` | `/api/skills/{name}` | 启用 / 禁用 |
+| `DELETE` | `/api/skills/{name}` | 删除（仅用户上传的） |
 
-### `PATCH /api/providers/{id}`
+### 会话管理
 
-Update a provider.
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| `GET` | `/api/conversations` | 获取列表（按最近更新排序） |
+| `POST` | `/api/conversations` | 新建 |
+| `GET` | `/api/conversations/{id}` | 获取详情（含消息列表） |
+| `PATCH` | `/api/conversations/{id}` | 重命名 |
+| `DELETE` | `/api/conversations/{id}` | 删除（级联删除消息） |
 
-### `DELETE /api/providers/{id}`
+---
 
-Delete a provider.
+## 🗄️ 数据库
 
-### `GET /api/skills`
+SQLite，包含 4 张表（首次启动自动创建）：
 
-Returns list of all registered skills with their schemas.
+| 表名 | 用途 |
+|------|------|
+| `providers` | LLM 服务商配置（名称、类型、API Key、模型等） |
+| `skills_config` | 技能启用/禁用状态及来源追踪 |
+| `conversations` | 会话元数据（标题、时间戳） |
+| `messages` | 会话消息记录 |
+
+---
+
+## 🤝 参与贡献
+
+1. Fork 本仓库
+2. 创建功能分支 (`git checkout -b feature/awesome-skill`)
+3. 提交修改 (`git commit -m '添加 awesome-skill'`)
+4. 推送分支 (`git push origin feature/awesome-skill`)
+5. 提交 Pull Request
+
+---
+
+## 📄 开源协议
+
+本项目基于 [MIT License](LICENSE) 开源。
