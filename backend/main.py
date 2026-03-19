@@ -6,10 +6,12 @@ Run:
 """
 
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 load_dotenv()  # load .env file before anything else
 
@@ -48,6 +50,10 @@ app.include_router(chat_router)
 app.include_router(conversations_router)
 app.include_router(providers_router)
 app.include_router(skills_router)
+
+_static_dir = Path(__file__).parent / "static" / "images"
+_static_dir.mkdir(parents=True, exist_ok=True)
+app.mount("/static/images", StaticFiles(directory=str(_static_dir)), name="static-images")
 
 
 @app.get("/api/health")

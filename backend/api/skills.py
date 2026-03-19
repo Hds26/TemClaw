@@ -1,5 +1,10 @@
 """
 skills.py — /api/skills routes (list, upload, toggle, delete)
+
+Supports uploading:
+  - .py  — Native Skill file (validated directly)
+  - .zip — ClawHub package (claw.json + instructions.md + optional tools.json)
+  - .json — ClawHub claw.json / skill.json (standalone)
 """
 
 from __future__ import annotations
@@ -12,12 +17,16 @@ from core.skill_loader import (
     get_all_skills,
     reload_skills,
     validate_skill_file,
+    convert_clawhub_zip,
+    convert_clawhub_json,
     SKILLS_DIR,
     BUILTIN_FILES,
 )
 from db import storage
 
 router = APIRouter(prefix="/api/skills", tags=["skills"])
+
+ALLOWED_EXTENSIONS = (".py", ".zip", ".json")
 
 
 class ToggleBody(BaseModel):
@@ -54,13 +63,35 @@ async def list_skills():
 
 @router.post("/upload", status_code=201)
 async def upload_skill(file: UploadFile = File(...)):
-    """Upload a .py skill file, validate it, save to skills/ and register."""
-    if not file.filename or not file.filename.endswith(".py"):
-        raise HTTPException(400, "Only .py files are accepted")
-    if file.filename in BUILTIN_FILES:
-        raise HTTPException(400, f"Cannot overwrite built-in file '{file.filename}'")
+    """Upload a skill file (.py / .zip / .json), validate, save and register."""
+    fname = file.filename or ""
+    ext = ""
+    for e in ALLOWED_EXTENSIONS:
+        if fname.lower().endswith(e):
+            ext = e
+            break
+
+    if not ext:
+        raise HTTPException(
+            400,
+            f"Unsupported file type. Accepted formats: {', '.join(ALLOWED_EXTENSIONS)}"
+        )
 
     content_bytes = await file.read()
+
+    if ext == ".py":
+        return await _handle_py_upload(fname, content_bytes)
+    elif ext == ".zip":
+        return await _handle_zip_upload(content_bytes)
+    elif ext == ".json":
+        return await _handle_json_upload(content_bytes)
+
+
+async def _handle_py_upload(filename: str, content_bytes: bytes) -> dict:
+    """Process a native .py Skill upload."""
+    if filename in BUILTIN_FILES:
+        raise HTTPException(400, f"Cannot overwrite built-in file '{filename}'")
+
     try:
         source = content_bytes.decode("utf-8")
     except UnicodeDecodeError:
@@ -70,28 +101,57 @@ async def upload_skill(file: UploadFile = File(...)):
     if not validation["valid"]:
         raise HTTPException(422, validation["error"])
 
-    skill_name = validation["name"]
+    return await _save_and_register(validation["name"], filename, source)
 
+
+async def _handle_zip_upload(content_bytes: bytes) -> dict:
+    """Process a ClawHub .zip package."""
+    result = convert_clawhub_zip(content_bytes)
+    if not result["valid"]:
+        raise HTTPException(422, result["error"])
+
+    return await _save_and_register(result["name"], result["filename"], result["source"])
+
+
+async def _handle_json_upload(content_bytes: bytes) -> dict:
+    """Process a standalone ClawHub claw.json / skill.json."""
+    try:
+        json_data = __import__("json").loads(content_bytes.decode("utf-8"))
+    except Exception as e:
+        raise HTTPException(400, f"Invalid JSON: {e}")
+
+    result = convert_clawhub_json(json_data)
+    if not result["valid"]:
+        raise HTTPException(422, result["error"])
+
+    return await _save_and_register(result["name"], result["filename"], result["source"])
+
+
+async def _save_and_register(skill_name: str, filename: str, source: str) -> dict:
+    """Write .py to disk, update DB, reload, return skill info."""
     existing = await storage.get_skill_config(skill_name)
     if existing and existing["is_builtin"]:
         raise HTTPException(409, f"Cannot overwrite built-in skill '{skill_name}'")
 
-    dest = SKILLS_DIR / file.filename
+    dest = SKILLS_DIR / filename
     dest.write_text(source, encoding="utf-8")
 
-    await storage.upsert_skill_config(skill_name, file.filename, is_builtin=False, enabled=True)
+    await storage.upsert_skill_config(skill_name, filename, is_builtin=False, enabled=True)
     await reload_skills()
 
     all_skills = get_all_skills()
     skill = all_skills.get(skill_name)
     if not skill:
-        raise HTTPException(500, "Skill file saved but failed to load. Check for import errors.")
+        raise HTTPException(
+            500,
+            "Skill file saved but failed to load. Check for import errors in the generated code."
+        )
 
     return {
         **skill.to_info(),
         "enabled": True,
         "is_builtin": False,
-        "filename": file.filename,
+        "filename": filename,
     }
 
 
