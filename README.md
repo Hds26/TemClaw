@@ -20,9 +20,9 @@
 ## ✨ 特性一览
 
 - **12+ LLM 服务商** — OpenAI、Anthropic Claude、Moonshot/Kimi、DeepSeek、通义千问、智谱 GLM、零一万物、Groq、Together AI、Ollama 及任意 OpenAI 兼容接口
-- **ReAct Agent 循环** — 自主多步推理 + 工具调用（最多 5 轮迭代，自动检测重复调用并终止）
+- **ReAct Agent 循环** — 自主多步推理 + 工具调用（最多 8 轮迭代，自动检测重复调用并终止）
 - **可插拔 Skill** — 放入 `.py` 文件或通过 Web UI 上传即可扩展能力，无需改动框架代码
-- **流式输出** — 基于 SSE 的实时流式响应，逐字显示 + 工具调用过程可视化
+- **流式输出** — 基于 SSE 的实时流式响应，逐字显示 + 工具调用过程可视化（含图片等富内容直出）
 - **对话持久化** — 聊天记录存入 SQLite，侧边栏浏览/重命名/删除历史会话
 - **Provider 管理** — 在设置页增删改查 LLM 服务商配置，支持一键**连接测试**
 - **Skill 管理** — 在设置页启用/禁用/上传/删除技能插件
@@ -74,10 +74,10 @@
                 │          │                         │                        │
                 │     ┌────┴────┐          ┌─────────┴─────────┐             │
                 │     ▼         ▼          ▼         ▼         ▼             │
-                │  ┌──────┐ ┌──────┐  ┌────────┐┌────────┐┌────────┐        │
-                │  │OpenAI│ │Claude│  │计算器   ││网络搜索 ││日期时间 │        │
-                │  │ SDK  │ │ SDK  │  │        ││        ││        │        │
-                │  └──────┘ └──────┘  └────────┘└────────┘└────────┘        │
+                │  ┌──────┐ ┌──────┐  ┌──────────────────────────────────┐   │
+                │  │OpenAI│ │Claude│  │ 计算器 / 搜索 / 读网页 / 生图 /   │   │
+                │  │ SDK  │ │ SDK  │  │ Python 沙箱 / 日期时间 等内置技能 │   │
+                │  └──────┘ └──────┘  └──────────────────────────────────┘   │
                 │     LLM 客户端               内置 Skills                    │
                 │     工厂                     + 用户自定义                    │
                 │                                                             │
@@ -174,6 +174,9 @@ npm run dev
 |------|------|------|
 | `calculator` | 安全计算数学表达式（`sqrt`、`sin`、`log`、`pi` 等） | 无 |
 | `web_search` | DuckDuckGo 搜索，支持 `search`（网页）和 `news`（新闻）模式 | 需要网络 |
+| `url_reader` | 抓取指定 URL 并提取正文（与 `web_search` 配合：先搜后读） | 需要网络 |
+| `image_generate` | 按文本描述生成或检索图片，下载到本地并通过 Markdown 展示 | 可选：`IMAGE_API_KEY`（见环境变量）；否则走 DuckDuckGo / 公开接口 |
+| `python_execute` | 在受限子进程中执行 Python 片段，返回 stdout/stderr | 无（建议用标准库；部分环境包名见技能内检测列表） |
 | `datetime_info` | 获取当前日期、时间、星期、时区 | 无 |
 
 ---
@@ -225,7 +228,7 @@ class MySkill(Skill):
 ```
 agent-template/
 ├── backend/
-│   ├── main.py                 # FastAPI 入口 + 生命周期
+│   ├── main.py                 # FastAPI 入口 + 生命周期 + /static/images 静态资源
 │   ├── requirements.txt
 │   ├── api/
 │   │   ├── chat.py             # POST /api/chat（SSE 流式 + 消息持久化）
@@ -240,7 +243,12 @@ agent-template/
 │   │   ├── base.py             # Skill 抽象基类
 │   │   ├── calculator.py       # 内置：数学计算器
 │   │   ├── datetime_info.py    # 内置：日期时间查询
-│   │   └── web_search.py       # 内置：DuckDuckGo 搜索
+│   │   ├── web_search.py       # 内置：DuckDuckGo 搜索
+│   │   ├── url_reader.py       # 内置：网页正文抓取
+│   │   ├── image_generate.py   # 内置：图片生成/检索（静态文件见 static/images）
+│   │   └── python_sandbox.py   # 内置：Python 代码执行（工具名 python_execute）
+│   ├── static/
+│   │   └── images/             # 生图技能保存的图片（/static/images 挂载）
 │   ├── db/
 │   │   └── storage.py          # 异步 SQLite 封装（4 张表）
 │   └── data/
@@ -288,6 +296,14 @@ cp .env.example backend/.env
 
 > 仅当数据库中 **没有任何 Provider** 时才会执行自动创建。
 
+**生图技能（`image_generate`，可选）：**
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `IMAGE_API_KEY` | — | 若设置，优先走 SiliconFlow 等 OpenAI 兼容生图 API |
+| `IMAGE_API_BASE` | `https://api.siliconflow.cn/v1` | 生图 API Base URL |
+| `BACKEND_URL` | `http://127.0.0.1:8000` | 返回给前端的图片访问基址（需与后端实际地址一致） |
+
 **前端** (`frontend/.env.local`)：
 
 | 变量 | 默认值 | 说明 |
@@ -299,6 +315,8 @@ cp .env.example backend/.env
 ## 📡 API 接口
 
 后端启动后可访问交互式文档：**[http://localhost:8000/docs](http://localhost:8000/docs)**
+
+健康检查：`GET /api/health` → `{"status":"ok"}`。
 
 ### 对话
 
